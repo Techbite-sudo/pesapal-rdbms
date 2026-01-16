@@ -119,7 +119,10 @@ func (p *Parser) parseCreateTable() *CreateTableStmt {
 
 	stmt.Columns = p.parseColumnDefinitions()
 
-	if !p.expectPeek(RPAREN) {
+	// parseColumnDefinitions leaves curToken at ) or at the last token before )
+	// We need to ensure we're at the closing paren
+	if !p.curTokenIs(RPAREN) {
+		p.addError("expected ) after column definitions")
 		return nil
 	}
 
@@ -150,13 +153,15 @@ func (p *Parser) parseColumnDefinitions() []*ColumnDef {
 		case VARCHAR:
 			col.DataType = "VARCHAR"
 			if p.peekTokenIs(LPAREN) {
-				p.nextToken() // consume VARCHAR
 				p.nextToken() // consume (
+				p.nextToken() // move to size
 				if p.curTokenIs(INT) {
 					size, _ := strconv.Atoi(p.curToken.Literal)
 					col.Size = size
 				}
-				p.nextToken() // consume size
+				if !p.expectPeek(RPAREN) {
+					return nil
+				}
 			}
 		case BOOLEAN:
 			col.DataType = "BOOLEAN"
@@ -171,19 +176,19 @@ func (p *Parser) parseColumnDefinitions() []*ColumnDef {
 		p.nextToken()
 		for p.curTokenIs(PRIMARY) || p.curTokenIs(UNIQUE) || p.curTokenIs(NOT) {
 			if p.curTokenIs(PRIMARY) {
-				if p.expectPeek(KEY) {
-					col.PrimaryKey = true
-					p.nextToken()
+				if !p.expectPeek(KEY) {
+					return nil
 				}
+				col.PrimaryKey = true
 			} else if p.curTokenIs(UNIQUE) {
 				col.Unique = true
-				p.nextToken()
 			} else if p.curTokenIs(NOT) {
-				if p.expectPeek(NULL) {
-					col.NotNull = true
-					p.nextToken()
+				if !p.expectPeek(NULL) {
+					return nil
 				}
+				col.NotNull = true
 			}
+			p.nextToken()
 		}
 
 		columns = append(columns, col)
@@ -274,9 +279,12 @@ func (p *Parser) parseSelect() *SelectStmt {
 		p.nextToken()
 	} else {
 		stmt.Columns = p.parseIdentifierList()
+		// parseIdentifierList leaves us at the last identifier, advance to next token
+		p.nextToken()
 	}
 
-	if !p.expectPeek(FROM) {
+	if !p.curTokenIs(FROM) {
+		p.addError("expected FROM after column list")
 		return nil
 	}
 
@@ -407,7 +415,7 @@ func (p *Parser) parseIdentifierList() []string {
 		}
 	}
 
-	p.nextToken()
+	// Don't advance - let the caller decide what to do next
 	return list
 }
 
